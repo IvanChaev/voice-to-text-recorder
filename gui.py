@@ -4,7 +4,7 @@ from tkinter import messagebox, ttk
 import os
 import sys
 import logging
-import shutil  # <-- добавили для поиска pythonw
+import shutil
 from main import load_settings, save_settings
 
 # --- Цветовая схема (тёмная тема) ---
@@ -41,7 +41,6 @@ def apply_theme(root):
     root.configure(bg=BG_COLOR)
 
 def make_draggable(widget, window):
-    # Список классов виджетов, при клике на которые окно НЕ должно двигаться
     ignored_widgets = (tk.Scale, tk.Entry, tk.Spinbox, tk.Button, tk.Checkbutton, ttk.Progressbar)
 
     def _start_move(event):
@@ -111,7 +110,6 @@ class SettingsWindow:
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Существующие параметры
         self.device_var = tk.StringVar(value=self.settings.get("device", "cuda"))
         self.beam_size_var = tk.StringVar(value=str(self.settings.get("beam_size", 5)))
         self.autostart_var = tk.BooleanVar(value=self.settings.get("autostart", False))
@@ -120,16 +118,10 @@ class SettingsWindow:
         self.normalize_var = tk.BooleanVar(value=self.settings.get("normalize", True))
         self.noise_reduction_var = tk.BooleanVar(value=self.settings.get("noise_reduction", False))
         self.noise_strength_var = tk.DoubleVar(value=self.settings.get("noise_reduction_strength", 0.8))
-
-        # Параметры изменения скорости
         self.time_stretch_var = tk.BooleanVar(value=self.settings.get("enable_time_stretch", False))
         self.speed_rate_var = tk.DoubleVar(value=self.settings.get("speed_rate", 1.0))
-
-        # Паузы перед и после записи
         self.silence_before_var = tk.DoubleVar(value=self.settings.get("silence_before_sec", 1.0))
         self.silence_after_var = tk.DoubleVar(value=self.settings.get("silence_after_sec", 1.0))
-
-        # Параметры детектора тишины
         self.silence_threshold_var = tk.DoubleVar(value=self.settings.get("silence_threshold", 5.0))
         self.silence_timeout_var = tk.DoubleVar(value=self.settings.get("silence_timeout_sec", 20.0))
 
@@ -220,9 +212,9 @@ class SettingsWindow:
         row += 1
 
         # --- ЭЛЕМЕНТЫ УПРАВЛЕНИЯ СКОРОСТЬЮ ---
-        time_stretch_check = tk.Checkbutton(main_frame, text="Изменение темпа речи (вкл)", 
-                                            variable=self.time_stretch_var, bg=CHECK_BG, fg=CHECK_FG, 
-                                            selectcolor=BG_COLOR, activebackground=BG_COLOR, 
+        time_stretch_check = tk.Checkbutton(main_frame, text="Изменение темпа речи (вкл)",
+                                            variable=self.time_stretch_var, bg=CHECK_BG, fg=CHECK_FG,
+                                            selectcolor=BG_COLOR, activebackground=BG_COLOR,
                                             activeforeground=FG_COLOR, font=("Arial", 11))
         time_stretch_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=5)
         row += 1
@@ -230,7 +222,7 @@ class SettingsWindow:
         lbl_speed_rate = tk.Label(main_frame, text="Коэффициент темпа:", bg=BG_COLOR, fg=FG_COLOR, font=("Arial", 11))
         make_draggable(lbl_speed_rate, self.window)
         lbl_speed_rate.grid(row=row, column=0, sticky=tk.W, pady=5)
-        
+
         speed_rate_scale = tk.Scale(main_frame, from_=0.5, to=2.0, resolution=0.05,
                                     orient=tk.HORIZONTAL, variable=self.speed_rate_var,
                                     bg=ENTRY_BG, fg=FG_COLOR, highlightthickness=0,
@@ -259,7 +251,7 @@ class SettingsWindow:
         silence_after_spin.grid(row=row, column=1, sticky=tk.W, padx=10, pady=5)
         row += 1
 
-        # ========== НОВЫЙ РАЗДЕЛ: АВТООСТОНОВКА ПО ТИШИНЕ ==========
+        # ========== НОВЫЙ РАЗДЕЛ: АВТООСТАНОВКА ПО ТИШИНЕ ==========
         lbl_auto_title = tk.Label(main_frame, text="Автоостановка по тишине", bg=BG_COLOR, fg=FG_COLOR, font=("Arial", 12, "bold", "underline"))
         make_draggable(lbl_auto_title, self.window)
         lbl_auto_title.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
@@ -369,20 +361,15 @@ class SettingsWindow:
         if enable:
             try:
                 project_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-                
-                # Ищем pythonw.exe: сначала через shutil.which (если в PATH),
-                # затем через замену в sys.executable, если не нашли – ошибка.
-                pythonw_path = shutil.which('pythonw')
-                if not pythonw_path:
-                    # Если pythonw не в PATH, пробуем заменить python.exe на pythonw.exe
-                    pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
-                    if not os.path.exists(pythonw_path):
-                        raise RuntimeError(
-                            "Не удалось найти pythonw.exe. Убедитесь, что Python установлен "
-                            "и добавлен в системную переменную PATH, либо укажите полный путь "
-                            "к pythonw.exe в настройках."
-                        )
-                
+                # Ищем pythonw.exe универсально
+                pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
+                if not os.path.exists(pythonw_path):
+                    pythonw_path = shutil.which("pythonw")
+                if not pythonw_path or not os.path.exists(pythonw_path):
+                    raise FileNotFoundError(
+                        "Не удалось найти pythonw.exe. "
+                        "Убедитесь, что Python добавлен в PATH, или укажите путь вручную в файле start.bat"
+                    )
                 bat_content = f"""@echo off
 cd /d "{project_dir}"
 if exist __pycache__ rmdir /s /q __pycache__
