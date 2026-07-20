@@ -1,0 +1,21 @@
+{
+    "model_size": "large-v3-turbo",
+    "device": "cuda",
+    "compute_type": "int8_float16",
+    "beam_size": 7,
+    "language": "auto",
+    "sample_rate": 16000,
+    "autostart": true,
+    "hotkey": "F3",
+    "gain_db": 5.0,
+    "normalize": true,
+    "noise_reduction": false,
+    "noise_reduction_strength": 0.1,
+    "input_device": 30,
+    "enable_time_stretch": false,
+    "speed_rate": 0.9,
+    "silence_before_sec": 1.0,
+    "silence_after_sec": 1.0,
+    "silence_threshold": 3.0,
+    "silence_timeout_sec": 10.0
+}

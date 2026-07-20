@@ -12,6 +12,8 @@ import os
 import subprocess
 from datetime import datetime
 
+from hotkey import HotkeyHandler
+
 try:
     import pyrubberband as pyrb
     RUBBERBAND_AVAILABLE = True
@@ -95,7 +97,6 @@ class VoiceRecorderApp:
         self.volume_update_running = False
         self.settings_window = None
 
-        # Инициализация детектора тишины
         threshold = self.settings.get("silence_threshold", 5.0)
         timeout = self.settings.get("silence_timeout_sec", 20.0)
         if threshold > 0 and timeout > 0:
@@ -112,7 +113,6 @@ class VoiceRecorderApp:
         self.max_record_seconds = 600
         self.auto_stop_id = None
 
-        # Верхняя панель: статус + настройки
         top_frame = tk.Frame(root, bg=root.cget("bg"))
         top_frame.pack(fill=tk.X, pady=5)
         make_draggable(top_frame, root)
@@ -127,7 +127,6 @@ class VoiceRecorderApp:
         )
         self.btn_settings.pack(side=tk.RIGHT, padx=10)
 
-        # ---- СТРОКА СЧЁТЧИКОВ ----
         self.counter_frame = tk.Frame(root, bg=root.cget("bg"))
         self.counter_frame.pack(fill=tk.X, pady=(0, 5))
         make_draggable(self.counter_frame, root)
@@ -145,7 +144,6 @@ class VoiceRecorderApp:
             font=("Arial", 12, "bold")
         )
         self.label_silence.pack(side=tk.RIGHT, padx=10)
-        # -------------------------
 
         self.button_record = create_styled_button(root, text="🔴 Запись", command=self.toggle_recording)
         self.button_record.pack(pady=10)
@@ -170,8 +168,13 @@ class VoiceRecorderApp:
 
         hotkey = self.settings.get("hotkey", "f9")
         self.tray = TrayIcon(self, root, hotkey=hotkey)
-        self.tray.setup()
         self.tray.update_state('processing')
+
+        self.hotkey_handler = HotkeyHandler(
+            callback=lambda: self.root.after(0, self.hotkey_toggle),
+            hotkey_str=self.settings.get("hotkey", "F3")
+        )
+        self.hotkey_handler.start()
 
         self.load_model_async()
         log_system_state("После initialization UI")
@@ -252,9 +255,13 @@ class VoiceRecorderApp:
     def restart_program(self):
         logger.info("Инициирован перезапуск программы...")
         try:
+            self.hotkey_handler.stop()
+        except Exception as e:
+            logger.warning(f"Ошибка при остановке хоткея: {e}")
+        try:
             self.tray.shutdown()
         except Exception as e:
-            logger.warning(f"Ошибка при остановке трея/хоткея перед рестартом: {e}")
+            logger.warning(f"Ошибка при остановке трея: {e}")
         shutdown_logging()
         self.root.quit()
         subprocess.Popen([sys.executable] + sys.argv)
@@ -294,7 +301,6 @@ class VoiceRecorderApp:
         self.recorded_frames = []
         self.audio_queue = queue.Queue()
 
-        # Сброс детектора тишины
         if self.silence_detector:
             self.silence_detector.reset()
         self.label_silence.config(text="🔇 Тишина: 0.0с")
@@ -341,11 +347,9 @@ class VoiceRecorderApp:
             return
         self.volume_var.set(self.current_volume)
 
-        # Обновление детектора тишины
         if self.silence_detector and self.is_recording:
             self.silence_detector.update(self.current_volume)
 
-        # ---- Обновление счётчиков ----
         if self.is_recording and self.recording_start_time:
             elapsed = time.time() - self.recording_start_time
             self.label_time.config(text=f"⏱ {self._format_time(elapsed)}")
@@ -357,7 +361,6 @@ class VoiceRecorderApp:
             self.label_silence.config(text=f"🔇 Тишина: {silence_dur:.1f}с")
         else:
             self.label_silence.config(text="🔇 Тишина: 0.0с")
-        # ---------------------------------
 
         self.root.after(30, self._update_volume_loop)
 
@@ -424,7 +427,6 @@ class VoiceRecorderApp:
             log_system_state("Перед обработкой аудио")
             audio_processed = self.apply_audio_processing(audio_float32, self.settings)
 
-            # Добавление тишины перед и после (если настроено)
             silence_before = self.settings.get("silence_before_sec", 1.0)
             silence_after = self.settings.get("silence_after_sec", 1.0)
             if silence_before > 0 or silence_after > 0:
@@ -445,7 +447,6 @@ class VoiceRecorderApp:
             self.label_status.config(text="Нет данных")
             self.tray.update_state(False)
 
-        # Сброс детектора после остановки
         if self.silence_detector:
             self.silence_detector.reset()
 
@@ -549,7 +550,6 @@ class VoiceRecorderApp:
         self.button_record.config(state="normal" if self.model_loaded else "disabled")
         self.volume_var.set(0.0)
         self.current_volume = 0.0
-        # Сброс счётчиков
         self.label_time.config(text="⏱ 00:00")
         self.label_silence.config(text="🔇 Тишина: 0.0с")
 
