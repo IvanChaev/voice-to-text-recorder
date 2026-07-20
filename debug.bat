@@ -1,5 +1,5 @@
 @echo off
 cd /d "%~dp0"
-:: Запуск через консольный python.exe с перенаправлением stderr в файл
-python main.py 2>> native_crash.log
+if not exist logs mkdir logs
+python main.py 2>> logs\native_crash.log
 pause
