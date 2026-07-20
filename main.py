@@ -1,20 +1,31 @@
 # main.py
 import os
+
+# ========== НАСТРОЙКА КЭША HUGGING FACE (универсально) ==========
+# По умолчанию используется стандартная папка пользователя: C:\Users\<имя>\.cache\huggingface
+# Можно переопределить через переменную окружения HF_HOME или изменить эту строку.
+DEFAULT_CACHE = os.path.join(os.environ.get('USERPROFILE', ''), '.cache', 'huggingface')
+CUSTOM_CACHE = os.environ.get('HF_HOME', DEFAULT_CACHE)
+
+# Создаём папку, если её нет
+if not os.path.exists(CUSTOM_CACHE):
+    try:
+        os.makedirs(CUSTOM_CACHE, exist_ok=True)
+    except:
+        pass  # если не удалось создать, будет использован стандартный путь
+
+os.environ["HF_HOME"] = CUSTOM_CACHE
+os.environ["TRANSFORMERS_CACHE"] = CUSTOM_CACHE
+os.environ["HUGGINGFACE_HUB_CACHE"] = CUSTOM_CACHE
+# ==========================================================================
+
 import sys
 import json
 import logging
 import psutil
 import traceback
+import gc
 from datetime import datetime
-
-# ========== ПРИНУДИТЕЛЬНАЯ УСТАНОВКА ПУТИ К КЭШУ ОТКЛЮЧЕНА ==========
-# Если вы хотите изменить папку кэша Hugging Face, установите переменную окружения HF_HOME
-# или раскомментируйте строки ниже и укажите свой путь.
-# CUSTOM_CACHE = "D:/ProgramData/.cache/huggingface"
-# os.environ["HF_HOME"] = CUSTOM_CACHE
-# os.environ["TRANSFORMERS_CACHE"] = CUSTOM_CACHE
-# os.environ["HUGGINGFACE_HUB_CACHE"] = CUSTOM_CACHE
-# ===================================================================
 
 sys.modules.setdefault("main", sys.modules[__name__])
 
@@ -29,16 +40,16 @@ from logger_utils import setup_logging, shutdown_logging, log_time, log_exceptio
 setup_logging(LOG_FILENAME, LOG_LEVEL, log_dir=LOG_DIR, keep_sessions=LOG_KEEP_SESSIONS)
 logger_pid = logging.getLogger("PIDManager")
 
-# ---------- ДЕФОЛТНЫЕ НАСТРОЙКИ (large-v3-turbo + int8_float16) ----------
+# ---------- ДЕФОЛТНЫЕ НАСТРОЙКИ ----------
 DEFAULT_SETTINGS = {
     "model_size": "large-v3-turbo",
-    "device": "cuda",               # можно изменить на "cpu" в настройках, если нет видеокарты
+    "device": "cuda",
     "compute_type": "int8_float16",
     "beam_size": 5,
     "sample_rate": 16000,
     "language": "auto",
     "autostart": False,
-    "hotkey": "F3",                 # удобная клавиша по умолчанию
+    "hotkey": "left alt+caps lock",
     "gain_db": 10.0,
     "normalize": True,
     "noise_reduction": False,
@@ -82,26 +93,47 @@ from faster_whisper import WhisperModel
 class Transcriber:
     def __init__(self, model_size="medium", device="cuda", compute_type="int8_float16", beam_size=5):
         self.logger = logging.getLogger("Transcriber")
-        self.logger.info(f"Загрузка Whisper: {model_size} | Устройство: {device} | Вычисления: {compute_type}")
-        self.model = WhisperModel(
-            model_size_or_path=model_size,
-            device=device,
-            compute_type=compute_type
-        )
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
         self.beam_size = beam_size
+        self.model = None
+        self.load_model()
 
-    def transcribe(self, audio_data):
+    def load_model(self):
+        self.logger.info(f"Загрузка Whisper: {self.model_size} | Устройство: {self.device} | Вычисления: {self.compute_type}")
+        self.model = WhisperModel(
+            model_size_or_path=self.model_size,
+            device=self.device,
+            compute_type=self.compute_type
+        )
+
+    def transcribe(self, audio_data, retry=True):
         if audio_data is None or len(audio_data) == 0:
             self.logger.warning("Пустой массив на входе декодера.")
             return "", "unknown", 0.0
-        
-        segments, info = self.model.transcribe(
-            audio_data,
-            beam_size=self.beam_size,
-            vad_filter=True
-        )
-        text = " ".join(segment.text for segment in segments)
-        return text, info.language, info.language_probability
+
+        try:
+            segments, info = self.model.transcribe(
+                audio_data,
+                beam_size=self.beam_size,
+                vad_filter=True
+            )
+            text = " ".join(segment.text for segment in segments)
+            return text, info.language, info.language_probability
+        except Exception as e:
+            if retry and ("cuda" in str(e).lower() or "cublas" in str(e).lower() or
+                          "memory" in str(e).lower() or "driver" in str(e).lower()):
+                self.logger.warning("Обнаружен сбой CUDA (возможно, после выхода из сна). Перезагружаем модель...")
+                try:
+                    del self.model
+                except:
+                    pass
+                gc.collect()
+                self.load_model()
+                return self.transcribe(audio_data, retry=False)
+            else:
+                raise
 
 # ---------- PID-менеджмент ----------
 PID_FILE = os.path.join(LOG_DIR, "pid.pid")
