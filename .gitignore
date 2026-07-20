@@ -1,0 +1,29 @@
+# Логи
+logs/
+*.log
+
+# Настройки пользователя
+settings.json
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Сборки
+dist/
+build/
+*.spec
+
+# Временные файлы
+*.tmp
+*.temp

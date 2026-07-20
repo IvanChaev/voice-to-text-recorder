@@ -1,0 +1,8 @@
+# Проект ориентирован только на Windows — фиксируем CRLF для текстовых файлов,
+# чтобы Git не переписывал переносы строк и не создавал шумных диффов.
+* text=auto eol=crlf
+
+*.py text eol=crlf
+*.bat text eol=crlf
+*.json text eol=crlf
+*.md text eol=crlf
