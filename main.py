@@ -1,23 +1,30 @@
 # main.py
 import os
+import faulthandler
 
-# ========== НАСТРОЙКА КЭША HUGGING FACE (универсально) ==========
-# По умолчанию используется стандартная папка пользователя: C:\Users\<имя>\.cache\huggingface
-# Можно переопределить через переменную окружения HF_HOME или изменить эту строку.
-DEFAULT_CACHE = os.path.join(os.environ.get('USERPROFILE', ''), '.cache', 'huggingface')
-CUSTOM_CACHE = os.environ.get('HF_HOME', DEFAULT_CACHE)
+# ========== ПЕРЕХВАТ СЕГФОЛТОВ (краши в C-расширениях) ==========
+_CRASH_LOG = os.path.join("logs", "crash_dump.log")
+os.makedirs("logs", exist_ok=True)
+faulthandler.enable(file=open(_CRASH_LOG, "ab", buffering=0), all_threads=True)
+# =================================================================
 
-# Создаём папку, если её нет
-if not os.path.exists(CUSTOM_CACHE):
-    try:
+# ========== ПУТЬ К КЭШУ HUGGING FACE ==========
+# Приоритет: переменная окружения HF_HOME > старый кэш на этом ПК > локальная папка hf_cache/
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+LEGACY_CACHE = "D:/ProgramData/.cache/huggingface"
+LOCAL_CACHE = os.path.join(PROJECT_DIR, "hf_cache")
+if not os.environ.get("HF_HOME"):
+    if os.path.isdir(LEGACY_CACHE):
+        CUSTOM_CACHE = LEGACY_CACHE
+    else:
+        CUSTOM_CACHE = LOCAL_CACHE
         os.makedirs(CUSTOM_CACHE, exist_ok=True)
-    except:
-        pass  # если не удалось создать, будет использован стандартный путь
+    os.environ["HF_HOME"] = CUSTOM_CACHE
+    os.environ["TRANSFORMERS_CACHE"] = CUSTOM_CACHE
+    os.environ["HUGGINGFACE_HUB_CACHE"] = CUSTOM_CACHE
+# ================================================
 
-os.environ["HF_HOME"] = CUSTOM_CACHE
-os.environ["TRANSFORMERS_CACHE"] = CUSTOM_CACHE
-os.environ["HUGGINGFACE_HUB_CACHE"] = CUSTOM_CACHE
-# ==========================================================================
+APP_VERSION = "1.0.0"
 
 import sys
 import json
@@ -35,12 +42,12 @@ LOG_FILENAME = os.path.join(LOG_DIR, f"app_{SESSION_START_TIME:%Y-%m-%d_%H-%M-%S
 LOG_LEVEL = "DEBUG"
 LOG_KEEP_SESSIONS = 20
 
-from logger_utils import setup_logging, shutdown_logging, log_time, log_exception
+from logger_utils import setup_logging, shutdown_logging, log_time, log_exception, clear_restart_flag
 
 setup_logging(LOG_FILENAME, LOG_LEVEL, log_dir=LOG_DIR, keep_sessions=LOG_KEEP_SESSIONS)
 logger_pid = logging.getLogger("PIDManager")
 
-# ---------- ДЕФОЛТНЫЕ НАСТРОЙКИ ----------
+# ---------- ДЕФОЛТНЫЕ НАСТРОЙКИ (large-v3-turbo + int8_float16) ----------
 DEFAULT_SETTINGS = {
     "model_size": "large-v3-turbo",
     "device": "cuda",
@@ -122,6 +129,7 @@ class Transcriber:
             text = " ".join(segment.text for segment in segments)
             return text, info.language, info.language_probability
         except Exception as e:
+            # Если ошибка связана с CUDA / GPU / памятью и это первая попытка
             if retry and ("cuda" in str(e).lower() or "cublas" in str(e).lower() or
                           "memory" in str(e).lower() or "driver" in str(e).lower()):
                 self.logger.warning("Обнаружен сбой CUDA (возможно, после выхода из сна). Перезагружаем модель...")
@@ -131,8 +139,10 @@ class Transcriber:
                     pass
                 gc.collect()
                 self.load_model()
+                # Повторяем транскрипцию без retry, чтобы избежать бесконечного цикла
                 return self.transcribe(audio_data, retry=False)
             else:
+                # Иначе пробрасываем исключение
                 raise
 
 # ---------- PID-менеджмент ----------
@@ -195,13 +205,17 @@ def cleanup():
             logger_pid.error(f"Не удалось удалить PID-файл: {e}", exc_info=True)
 
 def main():
-    logger_pid.info("=== ЗАПУСК ПРИЛОЖЕНИЯ ===")
+    logger_pid.info(f"=== ЗАПУСК ПРИЛОЖЕНИЯ v{APP_VERSION} ===")
     check_and_clean_pid()
     create_pid_file()
+    clear_restart_flag()
 
     try:
         import recorder
         recorder.main()
+    except KeyboardInterrupt:
+        logger_pid.info("Получен сигнал Ctrl+C, завершение...")
+        sys.exit(0)
     except Exception as e:
         logger_pid.critical(f"Необратимый сбой инициализации recorder: {e}", exc_info=True)
         sys.exit(1)

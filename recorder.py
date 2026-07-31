@@ -12,6 +12,7 @@ import os
 import subprocess
 from datetime import datetime
 
+# Импорт для хоткея
 from hotkey import HotkeyHandler
 
 try:
@@ -35,7 +36,7 @@ from gui import (
     SettingsWindow, make_draggable
 )
 
-from logger_utils import setup_logging, shutdown_logging, log_time, log_system_state, log_exception
+from logger_utils import setup_logging, shutdown_logging, log_time, log_system_state, log_exception, flush_logging, write_restart_flag
 from tray_icon import TrayIcon
 
 import tts_helper
@@ -96,7 +97,9 @@ class VoiceRecorderApp:
         self.current_volume = 0.0
         self.volume_update_running = False
         self.settings_window = None
+        self._flush_counter = 0
 
+        # Инициализация детектора тишины
         threshold = self.settings.get("silence_threshold", 5.0)
         timeout = self.settings.get("silence_timeout_sec", 20.0)
         if threshold > 0 and timeout > 0:
@@ -113,6 +116,7 @@ class VoiceRecorderApp:
         self.max_record_seconds = 600
         self.auto_stop_id = None
 
+        # Верхняя панель: статус + настройки
         top_frame = tk.Frame(root, bg=root.cget("bg"))
         top_frame.pack(fill=tk.X, pady=5)
         make_draggable(top_frame, root)
@@ -127,6 +131,7 @@ class VoiceRecorderApp:
         )
         self.btn_settings.pack(side=tk.RIGHT, padx=10)
 
+        # ---- СТРОКА СЧЁТЧИКОВ ----
         self.counter_frame = tk.Frame(root, bg=root.cget("bg"))
         self.counter_frame.pack(fill=tk.X, pady=(0, 5))
         make_draggable(self.counter_frame, root)
@@ -144,6 +149,7 @@ class VoiceRecorderApp:
             font=("Arial", 12, "bold")
         )
         self.label_silence.pack(side=tk.RIGHT, padx=10)
+        # -------------------------
 
         self.button_record = create_styled_button(root, text="🔴 Запись", command=self.toggle_recording)
         self.button_record.pack(pady=10)
@@ -170,6 +176,7 @@ class VoiceRecorderApp:
         self.tray = TrayIcon(self, root, hotkey=hotkey)
         self.tray.update_state('processing')
 
+        # ---------- ИНИЦИАЛИЗАЦИЯ ХОТКЕЯ через HotkeyHandler ----------
         self.hotkey_handler = HotkeyHandler(
             callback=lambda: self.root.after(0, self.hotkey_toggle),
             hotkey_str=self.settings.get("hotkey", "F3")
@@ -179,6 +186,7 @@ class VoiceRecorderApp:
         self.load_model_async()
         log_system_state("После initialization UI")
 
+    # ---------- Остальные методы (без хоткея) ----------
     def _raise_clicked_window(self, event):
         try:
             event.widget.winfo_toplevel().lift()
@@ -254,6 +262,8 @@ class VoiceRecorderApp:
 
     def restart_program(self):
         logger.info("Инициирован перезапуск программы...")
+        write_restart_flag("restart")
+        # Останавливаем хоткей
         try:
             self.hotkey_handler.stop()
         except Exception as e:
@@ -328,11 +338,14 @@ class VoiceRecorderApp:
     def record_audio(self):
         logger.info("Запуск фонового аудиопотока InputStream.")
         def callback(indata, frames, time_info, status):
-            if status:
-                logger.warning(f"Статус аудиоввода: {status}")
-            self.audio_queue.put(indata.copy())
-            rms = np.sqrt(np.mean(indata**2))
-            self.current_volume = min(1.0, rms * 2.0) * 100.0
+            try:
+                if status:
+                    logger.warning(f"Статус аудиоввода: {status}")
+                self.audio_queue.put(indata.copy())
+                rms = np.sqrt(np.mean(indata**2))
+                self.current_volume = min(1.0, rms * 2.0) * 100.0
+            except Exception as e:
+                logger.error(f"Необработанная ошибка в audio callback: {e}", exc_info=True)
 
         try:
             with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, callback=callback):
@@ -343,26 +356,34 @@ class VoiceRecorderApp:
             self.root.after(0, self.handle_recording_error, e)
 
     def _update_volume_loop(self):
-        if not self.volume_update_running:
-            return
-        self.volume_var.set(self.current_volume)
+        try:
+            if not self.volume_update_running:
+                return
+            self.volume_var.set(self.current_volume)
 
-        if self.silence_detector and self.is_recording:
-            self.silence_detector.update(self.current_volume)
+            if self.silence_detector and self.is_recording:
+                self.silence_detector.update(self.current_volume)
 
-        if self.is_recording and self.recording_start_time:
-            elapsed = time.time() - self.recording_start_time
-            self.label_time.config(text=f"⏱ {self._format_time(elapsed)}")
-        else:
-            self.label_time.config(text="⏱ 00:00")
+            if self.is_recording and self.recording_start_time:
+                elapsed = time.time() - self.recording_start_time
+                self.label_time.config(text=f"⏱ {self._format_time(elapsed)}")
+            else:
+                self.label_time.config(text="⏱ 00:00")
 
-        if self.silence_detector and self.is_recording:
-            silence_dur = self.silence_detector.get_silence_duration()
-            self.label_silence.config(text=f"🔇 Тишина: {silence_dur:.1f}с")
-        else:
-            self.label_silence.config(text="🔇 Тишина: 0.0с")
+            if self.silence_detector and self.is_recording:
+                silence_dur = self.silence_detector.get_silence_duration()
+                self.label_silence.config(text=f"🔇 Тишина: {silence_dur:.1f}с")
+            else:
+                self.label_silence.config(text="🔇 Тишина: 0.0с")
+        except Exception as e:
+            log_exception(e)
 
-        self.root.after(30, self._update_volume_loop)
+        self._flush_counter = (self._flush_counter + 1) % 100
+        if self._flush_counter == 0:
+            flush_logging()
+
+        if self.volume_update_running:
+            self.root.after(30, self._update_volume_loop)
 
     def _format_time(self, seconds):
         hours = int(seconds // 3600)
@@ -421,7 +442,14 @@ class VoiceRecorderApp:
             self.recorded_frames.append(self.audio_queue.get())
 
         if self.recorded_frames:
-            audio_data = np.concatenate(self.recorded_frames, axis=0)
+            try:
+                audio_data = np.concatenate(self.recorded_frames, axis=0)
+            except Exception as e:
+                log_exception(e)
+                self.label_status.config(text="Ошибка сборки аудио")
+                self.reset_ui()
+                self.tray.update_state(False)
+                return
             audio_float32 = audio_data.flatten().astype(np.float32)
 
             log_system_state("Перед обработкой аудио")
@@ -449,6 +477,7 @@ class VoiceRecorderApp:
 
         if self.silence_detector:
             self.silence_detector.reset()
+        flush_logging()
 
     @log_time
     def apply_audio_processing(self, audio, settings):
@@ -513,17 +542,26 @@ class VoiceRecorderApp:
             log_system_state("Финиш декодирования")
 
             if text.strip():
-                self.root.after(0, self._copy_to_clipboard, text)
-                self.root.after(0, self.update_ui_after_transcription, text, True)
+                self._safe_after(0, self._copy_to_clipboard, text)
+                self._safe_after(0, self.update_ui_after_transcription, text, True)
             else:
-                self.root.after(0, self.update_ui_after_transcription, "Распознано пусто", False)
+                self._safe_after(0, self.update_ui_after_transcription, "Распознано пусто", False)
         except Exception as e:
             log_exception(e)
-            self.root.after(0, self.update_ui_after_transcription, f"Ошибка распознавания: {e}", False)
+            self._safe_after(0, self.update_ui_after_transcription, f"Ошибка распознавания: {e}", False)
         finally:
-            self.root.after(0, lambda: self.tray.update_state(False))
+            self._safe_after(0, lambda: self.tray.update_state(False))
             import gc
             gc.collect()
+            flush_logging()
+
+    def _safe_after(self, ms, func, *args):
+        try:
+            self.root.after(ms, func, *args)
+        except tk.TclError:
+            logger.debug("root уже уничтожен, пропускаем after()")
+        except Exception as e:
+            logger.warning(f"Ошибка в _safe_after: {e}")
 
     def _copy_to_clipboard(self, text):
         try:

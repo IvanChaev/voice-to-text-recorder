@@ -3,8 +3,8 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 import os
 import sys
-import logging
 import shutil
+import logging
 from main import load_settings, save_settings
 
 # --- Цветовая схема (тёмная тема) ---
@@ -41,6 +41,7 @@ def apply_theme(root):
     root.configure(bg=BG_COLOR)
 
 def make_draggable(widget, window):
+    # Список классов виджетов, при клике на которые окно НЕ должно двигаться
     ignored_widgets = (tk.Scale, tk.Entry, tk.Spinbox, tk.Button, tk.Checkbutton, ttk.Progressbar)
 
     def _start_move(event):
@@ -102,7 +103,7 @@ class SettingsWindow:
 
         self.window = tk.Toplevel(parent)
         self.window.title("Настройки")
-        self.window.geometry("440x820")
+        self.window.geometry("440x820")  # увеличенная высота для новых элементов
         self.window.resizable(False, False)
         apply_theme(self.window)
         self.window.grid_propagate(False)
@@ -110,6 +111,7 @@ class SettingsWindow:
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # Существующие параметры
         self.device_var = tk.StringVar(value=self.settings.get("device", "cuda"))
         self.beam_size_var = tk.StringVar(value=str(self.settings.get("beam_size", 5)))
         self.autostart_var = tk.BooleanVar(value=self.settings.get("autostart", False))
@@ -118,10 +120,16 @@ class SettingsWindow:
         self.normalize_var = tk.BooleanVar(value=self.settings.get("normalize", True))
         self.noise_reduction_var = tk.BooleanVar(value=self.settings.get("noise_reduction", False))
         self.noise_strength_var = tk.DoubleVar(value=self.settings.get("noise_reduction_strength", 0.8))
+
+        # Параметры изменения скорости
         self.time_stretch_var = tk.BooleanVar(value=self.settings.get("enable_time_stretch", False))
         self.speed_rate_var = tk.DoubleVar(value=self.settings.get("speed_rate", 1.0))
+
+        # Паузы перед и после записи
         self.silence_before_var = tk.DoubleVar(value=self.settings.get("silence_before_sec", 1.0))
         self.silence_after_var = tk.DoubleVar(value=self.settings.get("silence_after_sec", 1.0))
+
+        # НОВЫЕ: параметры детектора тишины
         self.silence_threshold_var = tk.DoubleVar(value=self.settings.get("silence_threshold", 5.0))
         self.silence_timeout_var = tk.DoubleVar(value=self.settings.get("silence_timeout_sec", 20.0))
 
@@ -212,9 +220,9 @@ class SettingsWindow:
         row += 1
 
         # --- ЭЛЕМЕНТЫ УПРАВЛЕНИЯ СКОРОСТЬЮ ---
-        time_stretch_check = tk.Checkbutton(main_frame, text="Изменение темпа речи (вкл)",
-                                            variable=self.time_stretch_var, bg=CHECK_BG, fg=CHECK_FG,
-                                            selectcolor=BG_COLOR, activebackground=BG_COLOR,
+        time_stretch_check = tk.Checkbutton(main_frame, text="Изменение темпа речи (вкл)", 
+                                            variable=self.time_stretch_var, bg=CHECK_BG, fg=CHECK_FG, 
+                                            selectcolor=BG_COLOR, activebackground=BG_COLOR, 
                                             activeforeground=FG_COLOR, font=("Arial", 11))
         time_stretch_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=5)
         row += 1
@@ -222,7 +230,7 @@ class SettingsWindow:
         lbl_speed_rate = tk.Label(main_frame, text="Коэффициент темпа:", bg=BG_COLOR, fg=FG_COLOR, font=("Arial", 11))
         make_draggable(lbl_speed_rate, self.window)
         lbl_speed_rate.grid(row=row, column=0, sticky=tk.W, pady=5)
-
+        
         speed_rate_scale = tk.Scale(main_frame, from_=0.5, to=2.0, resolution=0.05,
                                     orient=tk.HORIZONTAL, variable=self.speed_rate_var,
                                     bg=ENTRY_BG, fg=FG_COLOR, highlightthickness=0,
@@ -315,6 +323,7 @@ class SettingsWindow:
             new_settings["silence_before_sec"] = float(self.silence_before_var.get())
             new_settings["silence_after_sec"] = float(self.silence_after_var.get())
 
+            # НОВЫЕ параметры детектора тишины
             new_settings["silence_threshold"] = float(self.silence_threshold_var.get())
             new_settings["silence_timeout_sec"] = float(self.silence_timeout_var.get())
 
@@ -361,15 +370,13 @@ class SettingsWindow:
         if enable:
             try:
                 project_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-                # Ищем pythonw.exe универсально
                 pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
                 if not os.path.exists(pythonw_path):
-                    pythonw_path = shutil.which("pythonw")
-                if not pythonw_path or not os.path.exists(pythonw_path):
-                    raise FileNotFoundError(
-                        "Не удалось найти pythonw.exe. "
-                        "Убедитесь, что Python добавлен в PATH, или укажите путь вручную в файле start.bat"
-                    )
+                    pythonw_path = shutil.which("pythonw.exe")
+                    if not pythonw_path:
+                        raise FileNotFoundError(
+                            "Не найден pythonw.exe. Добавьте Python в PATH и повторите попытку."
+                        )
                 bat_content = f"""@echo off
 cd /d "{project_dir}"
 if exist __pycache__ rmdir /s /q __pycache__

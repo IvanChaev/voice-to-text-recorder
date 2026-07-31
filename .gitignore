@@ -5,6 +5,9 @@ logs/
 # Настройки пользователя
 settings.json
 
+# Локальный кэш моделей Hugging Face
+hf_cache/
+
 # Кэш Python
 __pycache__/
 *.pyc

@@ -35,52 +35,56 @@ class HotkeyHandler:
         logger.info("HotkeyHandler остановлен")
 
     def _thread_func(self):
-        # 1. Создаём скрытое окно
-        wc = win32gui.WNDCLASS()
-        wc.hInstance = win32api.GetModuleHandle(None)
-        wc.lpszClassName = "HotkeyHandlerWindow"
-        wc.lpfnWndProc = self._wnd_proc
-        class_atom = win32gui.RegisterClass(wc)
-        self.hwnd = win32gui.CreateWindow(
-            class_atom, "HotkeyHandlerWindow",
-            win32con.WS_OVERLAPPED,
-            0, 0, 0, 0,
-            0, 0,
-            wc.hInstance,
-            None
-        )
-        win32gui.UpdateWindow(self.hwnd)
-        logger.debug(f"Окно хоткея создано, hwnd={self.hwnd}")
-
-        # 2. Регистрируем хоткей
-        vk = self._parse_vk(self.hotkey_str)
-        if vk is None:
-            logger.error(f"Неверная клавиша: {self.hotkey_str}")
-            win32gui.DestroyWindow(self.hwnd)
-            return
         try:
-            win32gui.RegisterHotKey(self.hwnd, self.hotkey_id, 0, vk)
-            self.registered = True
-            logger.info(f"Хоткей {self.hotkey_str} зарегистрирован в HotkeyHandler")
-        except Exception as e:
-            logger.error(f"Ошибка регистрации хоткея: {e}")
+            # 1. Создаём скрытое окно
+            wc = win32gui.WNDCLASS()
+            wc.hInstance = win32api.GetModuleHandle(None)
+            wc.lpszClassName = "HotkeyHandlerWindow"
+            wc.lpfnWndProc = self._wnd_proc
+            class_atom = win32gui.RegisterClass(wc)
+            self.hwnd = win32gui.CreateWindow(
+                class_atom, "HotkeyHandlerWindow",
+                win32con.WS_OVERLAPPED,
+                0, 0, 0, 0,
+                0, 0,
+                wc.hInstance,
+                None
+            )
+            win32gui.UpdateWindow(self.hwnd)
+            logger.debug(f"Окно хоткея создано, hwnd={self.hwnd}")
 
-        # 3. Цикл обработки сообщений (без MsgWaitForMultipleObjects)
-        while self.running:
-            win32gui.PumpWaitingMessages()
-            if not win32gui.IsWindow(self.hwnd):
-                break
-            time.sleep(0.02)  # небольшая задержка, чтобы не грузить процессор
-
-        # 4. Очистка
-        if self.registered:
+            # 2. Регистрируем хоткей
+            vk = self._parse_vk(self.hotkey_str)
+            if vk is None:
+                logger.error(f"Неверная клавиша: {self.hotkey_str}")
+                win32gui.DestroyWindow(self.hwnd)
+                return
             try:
-                win32gui.UnregisterHotKey(self.hwnd, self.hotkey_id)
-            except:
-                pass
-        if win32gui.IsWindow(self.hwnd):
-            win32gui.DestroyWindow(self.hwnd)
-        logger.debug("HotkeyHandler поток завершён")
+                win32gui.RegisterHotKey(self.hwnd, self.hotkey_id, 0, vk)
+                self.registered = True
+                logger.info(f"Хоткей {self.hotkey_str} зарегистрирован в HotkeyHandler")
+            except Exception as e:
+                logger.error(f"Ошибка регистрации хоткея: {e}")
+
+            # 3. Цикл обработки сообщений (без MsgWaitForMultipleObjects)
+            while self.running:
+                win32gui.PumpWaitingMessages()
+                if not win32gui.IsWindow(self.hwnd):
+                    break
+                time.sleep(0.02)  # небольшая задержка, чтобы не грузить процессор
+
+        except Exception as e:
+            logger.critical(f"Критическая ошибка в потоке хоткея: {e}", exc_info=True)
+        finally:
+            # 4. Очистка
+            if self.registered:
+                try:
+                    win32gui.UnregisterHotKey(self.hwnd, self.hotkey_id)
+                except:
+                    pass
+            if self.hwnd and win32gui.IsWindow(self.hwnd):
+                win32gui.DestroyWindow(self.hwnd)
+            logger.debug("HotkeyHandler поток завершён")
 
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         if msg == win32con.WM_DESTROY:

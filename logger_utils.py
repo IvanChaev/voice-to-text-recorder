@@ -34,6 +34,32 @@ if sys.platform == "win32":
 
     _subprocess.Popen.__init__ = _no_console_popen_init
 
+# ========== ФЛАГ ПЕРЕЗАПУСКА ДЛЯ WATCHDOG ==========
+# Пишется ИСКЛЮЧИТЕЛЬНО при намеренном перезапуске/выходе из программы
+# (пункты меню трея "Перезапустить" / "Выход"). Watchdog (watchdog.bat)
+# читает этот файл, чтобы отличить запланированный перезапуск от падения:
+# если флага нет - любое завершение программы считается ошибкой/крашем.
+RESTART_FLAG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "restart.flag")
+
+def write_restart_flag(reason):
+    """Записывает флаг намеренного действия: 'restart' (перезапуск) или 'exit' (выход)."""
+    try:
+        os.makedirs(os.path.dirname(RESTART_FLAG_FILE), exist_ok=True)
+        with open(RESTART_FLAG_FILE, "w", encoding="utf-8") as f:
+            f.write(reason)
+        logging.getLogger(__name__).info(f"Флаг Watchdog записан: {reason}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Не удалось записать флаг Watchdog: {e}")
+
+def clear_restart_flag():
+    """Удаляет флаг при успешном старте программы - флаг живёт только во время перезапуска."""
+    try:
+        if os.path.exists(RESTART_FLAG_FILE):
+            os.remove(RESTART_FLAG_FILE)
+            logging.getLogger(__name__).info("Флаг Watchdog удалён при успешном старте.")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Не удалось удалить флаг Watchdog: {e}")
+
 # Попытка импортировать GPU-мониторинг
 try:
     import pynvml
@@ -214,11 +240,21 @@ def setup_logging(log_filename, log_level_str="DEBUG", log_dir=None, keep_sessio
     sys.excepthook = handle_exception
     logging.getLogger(__name__).info(f"Асинхронная система логирования успешно инициализирована. Файл сессии: {log_filename}")
 
+def flush_logging():
+    """Принудительно сбрасывает буферы логов на диск."""
+    for handler in logging.getLogger().handlers:
+        if hasattr(handler, 'flush'):
+            try:
+                handler.flush()
+            except Exception:
+                pass
+
 def shutdown_logging():
     """Корректно останавливает фоновый поток записи логов и сбрасывает буферы."""
     global _listener
     if _listener is not None:
         logging.getLogger(__name__).info("Завершение работы системы логирования...")
+        flush_logging()
         _listener.stop()
         _listener = None
 

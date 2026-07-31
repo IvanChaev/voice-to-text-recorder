@@ -5,6 +5,8 @@ import threading
 import logging
 import queue
 
+from logger_utils import write_restart_flag
+
 logger = logging.getLogger(__name__)
 
 class TrayIcon:
@@ -62,7 +64,10 @@ class TrayIcon:
         self._process_commands()
 
     def _run_icon(self):
-        self.icon.run()
+        try:
+            self.icon.run()
+        except Exception as e:
+            logger.error(f"Ошибка в потоке иконки трея: {e}", exc_info=True)
 
     def _process_commands(self):
         try:
@@ -90,17 +95,20 @@ class TrayIcon:
         self._send_command(('update_state', state))
 
     def _update_state(self, state):
-        logger.debug(f"_update_state: state={state}")
-        if state == 'processing':
-            self.is_recording = False
-            self.icon.icon = self.icon_yellow
-        elif state:
-            self.is_recording = True
-            self.icon.icon = self.icon_red
-        else:
-            self.is_recording = False
-            self.icon.icon = self.icon_green
-        self.icon.update_menu()  # обновить меню, если нужно
+        try:
+            logger.debug(f"_update_state: state={state}")
+            if state == 'processing':
+                self.is_recording = False
+                self.icon.icon = self.icon_yellow
+            elif state:
+                self.is_recording = True
+                self.icon.icon = self.icon_red
+            else:
+                self.is_recording = False
+                self.icon.icon = self.icon_green
+            self.icon.update_menu()
+        except Exception as e:
+            logger.error(f"Ошибка обновления иконки трея: {e}", exc_info=True)
 
     def _toggle_window(self):
         logger.debug("_toggle_window: переключение видимости через трей")
@@ -125,6 +133,7 @@ class TrayIcon:
 
     def _quit_internal(self):
         self.running = False
+        write_restart_flag("exit")
         self.icon.stop()
         self.root.after(0, self.root.quit)
 
