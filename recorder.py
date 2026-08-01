@@ -33,10 +33,10 @@ from gui import (
     BUTTON_BG, BUTTON_FG,
     apply_theme, create_styled_label, create_styled_button,
     set_recording_style, reset_button_style,
-    SettingsWindow, make_draggable
+    SettingsWindow, RestartInfoWindow, make_draggable
 )
 
-from logger_utils import setup_logging, shutdown_logging, log_time, log_system_state, log_exception, flush_logging, write_restart_flag
+from logger_utils import setup_logging, shutdown_logging, log_time, log_system_state, log_exception, flush_logging, write_restart_flag, write_restart_info, read_and_clear_restart_info
 from tray_icon import TrayIcon
 
 import tts_helper
@@ -97,6 +97,7 @@ class VoiceRecorderApp:
         self.current_volume = 0.0
         self.volume_update_running = False
         self.settings_window = None
+        self.restart_info_window = None
         self._flush_counter = 0
 
         # Инициализация детектора тишины
@@ -183,6 +184,8 @@ class VoiceRecorderApp:
         )
         self.hotkey_handler.start()
 
+        self.maybe_show_restart_info()
+
         self.load_model_async()
         log_system_state("После initialization UI")
 
@@ -238,6 +241,16 @@ class VoiceRecorderApp:
                 self.settings_window = None
         self.settings_window = SettingsWindow(self.root, self)
 
+    def maybe_show_restart_info(self):
+        """Показывает одноразовое инфо-окно о причине перезапуска, если есть маркер."""
+        reason = read_and_clear_restart_info()
+        if reason is None:
+            return
+        try:
+            self.restart_info_window = RestartInfoWindow(self.root, reason)
+        except Exception as e:
+            log_exception(e)
+
     def settings_window_closed(self):
         self.settings_window = None
 
@@ -245,6 +258,8 @@ class VoiceRecorderApp:
         self.root.withdraw()
         if self.settings_window and self.settings_window.window.winfo_exists():
             self.settings_window.window.withdraw()
+        if self.restart_info_window and self.restart_info_window.window.winfo_exists():
+            self.restart_info_window.window.withdraw()
 
     def _show_all(self):
         self.root.deiconify()
@@ -253,6 +268,9 @@ class VoiceRecorderApp:
         if self.settings_window and self.settings_window.window.winfo_exists():
             self.settings_window.window.deiconify()
             self.settings_window.window.lift()
+        if self.restart_info_window and self.restart_info_window.window.winfo_exists():
+            self.restart_info_window.window.deiconify()
+            self.restart_info_window.window.lift()
 
     def toggle_visibility(self):
         if self.root.state() == 'withdrawn':
@@ -263,6 +281,7 @@ class VoiceRecorderApp:
     def restart_program(self):
         logger.info("Инициирован перезапуск программы...")
         write_restart_flag("restart")
+        write_restart_info("user")
         # Останавливаем хоткей
         try:
             self.hotkey_handler.stop()

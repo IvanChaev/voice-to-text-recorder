@@ -35,14 +35,15 @@ if sys.platform == "win32":
     _subprocess.Popen.__init__ = _no_console_popen_init
 
 # ========== ФЛАГ ПЕРЕЗАПУСКА ДЛЯ WATCHDOG ==========
-# Пишется ИСКЛЮЧИТЕЛЬНО при намеренном перезапуске/выходе из программы
-# (пункты меню трея "Перезапустить" / "Выход"). Watchdog (watchdog.bat)
-# читает этот файл, чтобы отличить запланированный перезапуск от падения:
-# если флага нет - любое завершение программы считается ошибкой/крашем.
+# Пишется ТОЛЬКО при намеренном перезапуске из меню трея ("Перезапустить").
+# Watchdog (watchdog.bat) читает этот файл, чтобы отличить запланированный
+# перезапуск от падения: если флага нет или он не "restart" - любое
+# завершение программы (включая "Выход" из трея) считается ошибкой/крашем,
+# и watchdog перезапускает программу.
 RESTART_FLAG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "restart.flag")
 
 def write_restart_flag(reason):
-    """Записывает флаг намеренного действия: 'restart' (перезапуск) или 'exit' (выход)."""
+    """Записывает флаг намеренного действия: 'restart' (перезапуск)."""
     try:
         os.makedirs(os.path.dirname(RESTART_FLAG_FILE), exist_ok=True)
         with open(RESTART_FLAG_FILE, "w", encoding="utf-8") as f:
@@ -59,6 +60,39 @@ def clear_restart_flag():
             logging.getLogger(__name__).info("Флаг Watchdog удалён при успешном старте.")
     except Exception as e:
         logging.getLogger(__name__).warning(f"Не удалось удалить флаг Watchdog: {e}")
+
+# ========== МАРКЕР ПРИЧИНЫ ПЕРЕЗАПУСКА ДЛЯ ИНФО-ОКНА ==========
+# Пишется перед перезапуском программы: 'watchdog' - перезапуск выполнил
+# watchdog.bat после сбоя, 'user' - перезапуск инициировал пользователь
+# (меню трея или сохранение настроек). При старте программа читает маркер,
+# показывает одноразовое инфо-окно и удаляет его.
+RESTART_INFO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "restart_info.flag")
+
+def write_restart_info(reason):
+    """Записывает маркер причины перезапуска для инфо-окна: 'watchdog' или 'user'."""
+    try:
+        os.makedirs(os.path.dirname(RESTART_INFO_FILE), exist_ok=True)
+        with open(RESTART_INFO_FILE, "w", encoding="utf-8") as f:
+            f.write(reason)
+        logging.getLogger(__name__).info(f"Маркер причины перезапуска записан: {reason}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Не удалось записать маркер причины перезапуска: {e}")
+
+def read_and_clear_restart_info():
+    """Читает маркер причины перезапуска и удаляет его. Возвращает 'watchdog'/'user' или None."""
+    try:
+        if not os.path.exists(RESTART_INFO_FILE):
+            return None
+        with open(RESTART_INFO_FILE, "r", encoding="utf-8") as f:
+            reason = f.read().strip()
+        try:
+            os.remove(RESTART_INFO_FILE)
+        except OSError:
+            pass
+        return reason if reason in ("watchdog", "user") else None
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Не удалось прочитать маркер причины перезапуска: {e}")
+        return None
 
 # Попытка импортировать GPU-мониторинг
 try:

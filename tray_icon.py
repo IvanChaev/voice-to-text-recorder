@@ -5,8 +5,6 @@ import threading
 import logging
 import queue
 
-from logger_utils import write_restart_flag
-
 logger = logging.getLogger(__name__)
 
 class TrayIcon:
@@ -133,7 +131,6 @@ class TrayIcon:
 
     def _quit_internal(self):
         self.running = False
-        write_restart_flag("exit")
         self.icon.stop()
         self.root.after(0, self.root.quit)
 

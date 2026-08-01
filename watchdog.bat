@@ -7,12 +7,14 @@ set "PIDFILE=%~dp0logs\pid.pid"
 set "LOGDIR=%~dp0logs"
 set "LOGFILE=%~dp0logs\watchdog.log"
 set "FLAGFILE=%~dp0logs\restart.flag"
+set "INFOFILE=%~dp0logs\restart_info.flag"
 set "STARTBAT=%~dp0start.bat"
 set "IMAGENAME=pythonw.exe"
 set "CHECK_INTERVAL=10"
 set "CONFIRM_DEAD_COUNT=2"
 set "RESTART_GRACE=15"
-set "RESTART_WAIT=90"
+set "RESTART_WAIT=180"
+set "BOOT_WAIT=180"
 set "FLAG_MAX_AGE=300"
 set "CRASH_LOOP_FAST=3"
 set "COOLDOWN=120"
@@ -24,6 +26,7 @@ echo.
 echo  ============================================
 echo  Watchdog pid-файла: !PIDFILE!
 echo  Интервал проверки: !CHECK_INTERVAL! сек
+echo  Ожидание загрузки после перезапуска: !BOOT_WAIT! сек
 echo  Флаг перезапуска: !FLAGFILE!
 echo  Лог: !LOGFILE!
 echo  ============================================
@@ -56,6 +59,26 @@ if "!ALIVE!"=="1" (
 :loop
 call :check_state
 
+if "!MODE!"=="wait_boot" (
+    if "!ALIVE!"=="1" (
+        set "MODE="
+        set "DEAD_COUNT=0"
+        set "FAST_DEATHS=0"
+        set "LAST_STATUS=alive"
+        call :log "СТАТУС: программа запустилась после перезапуска (pid !PID!), начинаю наблюдение"
+    ) else (
+        set /a "WAIT_ELAPSED+=!CHECK_INTERVAL!"
+        if !WAIT_ELAPSED! GEQ !BOOT_WAIT! (
+            set "MODE="
+            set "DEAD_COUNT=0"
+            call :log "ОШИБКА: программа не поднялась за !BOOT_WAIT! сек после перезапуска - повторная попытка"
+            call :try_restart
+        )
+    )
+    call :sleep !CHECK_INTERVAL!
+    goto :loop
+)
+
 if "!MODE!"=="wait_restart" (
     if "!ALIVE!"=="1" (
         set "MODE="
@@ -77,18 +100,6 @@ if "!MODE!"=="wait_restart" (
     goto :loop
 )
 
-if "!MODE!"=="stopped" (
-    if "!ALIVE!"=="1" (
-        set "MODE="
-        set "DEAD_COUNT=0"
-        set "FAST_DEATHS=0"
-        set "LAST_STATUS=alive"
-        call :log "СТАТУС: программа запущена заново (pid !PID!), возобновляю наблюдение"
-    )
-    call :sleep !CHECK_INTERVAL!
-    goto :loop
-)
-
 if "!ALIVE!"=="1" (
     set "DEAD_COUNT=0"
     set "FAST_DEATHS=0"
@@ -99,17 +110,16 @@ if "!ALIVE!"=="1" (
     if !DEAD_COUNT! GEQ !CONFIRM_DEAD_COUNT! (
         call :read_flag
         if defined FLAG (
-            if "!FLAG!"=="exit" (
-                call :log "ИНФО: программа остановлена пользователем (Выход в трее), жду запуска вручную"
-                set "MODE=stopped"
-                set "LAST_STATUS=dead"
-                set "DEAD_COUNT=0"
-            ) else (
+            if "!FLAG!"=="restart" (
                 call :log "ИНФО: обнаружен внутренний перезапуск, ожидаю возвращения программы..."
                 set "MODE=wait_restart"
                 set "WAIT_ELAPSED=0"
                 set "LAST_STATUS=dead"
                 set "DEAD_COUNT=0"
+            ) else (
+                call :log "КРИТИЧНО: программа завершена нештатно - !CAUSE!"
+                set "LAST_STATUS=dead"
+                if "!RESTART_ENABLED!"=="1" call :try_restart
             )
             if exist "!FLAGFILE!" del "!FLAGFILE!" 2>nul
         ) else (
@@ -179,11 +189,14 @@ if not exist "!STARTBAT!" (
         set "MISSING_LOGGED=1"
     )
 ) else (
+    echo watchdog> "!INFOFILE!"
     call :log "ПЕРЕЗАПУСК программы..."
     start "" /min "!STARTBAT!"
 )
 set "DEAD_COUNT=0"
 set "LAST_STATUS="
+set "MODE=wait_boot"
+set "WAIT_ELAPSED=0"
 call :sleep !RESTART_GRACE!
 exit /b 0
 

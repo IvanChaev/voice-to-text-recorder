@@ -1,6 +1,52 @@
 # main.py
 import os
+import sys
+import ctypes
 import faulthandler
+
+# ========== ЗАЩИТА ОТ ДВУХ ЗАПУЩЕННЫХ ЭКЗЕМПЛЯРОВ ==========
+# Именованный мьютекс Windows: второй экземпляр программы завершается сразу,
+# ещё до тяжёлых импортов. Это исключает ситуацию двух одновременно
+# запущенных копий (например, когда watchdog перезапускает программу,
+# а прошлая копия ещё грузится и не успела создать pid-файл).
+_SINGLE_INSTANCE_NAME = "Local\\my_voice_project_single_instance"
+_single_instance_handle = None
+
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+_kernel32.CreateMutexW.restype = ctypes.c_void_p
+_kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+_kernel32.CloseHandle.restype = ctypes.c_bool
+
+def acquire_single_instance():
+    """Захватывает именованный мьютекс. True - экземпляр единственный."""
+    global _single_instance_handle
+    try:
+        _single_instance_handle = _kernel32.CreateMutexW(None, False, _SINGLE_INSTANCE_NAME)
+        if not _single_instance_handle:
+            return True
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            _kernel32.CloseHandle(_single_instance_handle)
+            _single_instance_handle = None
+            return False
+        return True
+    except Exception:
+        _single_instance_handle = None
+        return True  # при сбое не блокируем запуск
+
+def release_single_instance():
+    """Освобождает мьютекс при корректном завершении."""
+    global _single_instance_handle
+    if _single_instance_handle:
+        try:
+            _kernel32.CloseHandle(_single_instance_handle)
+        except Exception:
+            pass
+        _single_instance_handle = None
+
+if not acquire_single_instance():
+    sys.exit(0)
+# =================================================================
 
 # ========== ПЕРЕХВАТ СЕГФОЛТОВ (краши в C-расширениях) ==========
 _CRASH_LOG = os.path.join("logs", "crash_dump.log")
@@ -220,6 +266,7 @@ def main():
         logger_pid.critical(f"Необратимый сбой инициализации recorder: {e}", exc_info=True)
         sys.exit(1)
     finally:
+        release_single_instance()
         cleanup()
         logger_pid.info("=== СЕССИЯ ЗАКРЫТА ===")
         shutdown_logging()

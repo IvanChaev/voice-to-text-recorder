@@ -93,6 +93,62 @@ def set_recording_style(button):
 def reset_button_style(button):
     button.config(text="🔴 Запись", bg=BUTTON_BG, fg=BUTTON_FG, state="normal")
 
+class RestartInfoWindow:
+    """Одноразовое инфо-окно о причине перезапуска программы."""
+    WINDOW_WIDTH = 420
+    WINDOW_HEIGHT = 200
+
+    def __init__(self, parent, reason):
+        self.parent = parent
+        self.window = tk.Toplevel(parent)
+        self.window.title("Информация")
+        self.window.geometry(f"{self.WINDOW_WIDTH}x{self.WINDOW_HEIGHT}")
+        self.window.resizable(False, False)
+        apply_theme(self.window)
+        self.window.protocol("WM_DELETE_WINDOW", self.close)
+        self.window.transient(parent)
+
+        if reason == "watchdog":
+            message = "Программа была перезапущена watchdog-ом\n(автоматически после сбоя)."
+            logger.info("Инфо-окно: программа перезапущена watchdog-ом")
+        elif reason == "user":
+            message = "Программа была перезапущена пользователем."
+            logger.info("Инфо-окно: программа перезапущена пользователем")
+        else:
+            message = "Программа была перезапущена."
+            logger.info("Инфо-окно: программа перезапущена (причина неизвестна)")
+
+        frame = tk.Frame(self.window, bg=BG_COLOR)
+        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        make_draggable(self.window, self.window)
+        make_draggable(frame, self.window)
+
+        lbl_icon = tk.Label(frame, text="ℹ️", font=("Arial", 28), bg=BG_COLOR, fg=FG_COLOR)
+        lbl_icon.pack(pady=(0, 10))
+
+        lbl_message = tk.Label(frame, text=message, bg=BG_COLOR, fg=FG_COLOR,
+                               font=("Arial", 12), justify=tk.CENTER)
+        lbl_message.pack(pady=5)
+
+        btn_ok = tk.Button(frame, text="ОК", command=self.close,
+                           font=("Arial", 11, "bold"), bg=BUTTON_BG, fg=FG_COLOR,
+                           activebackground=BUTTON_ACTIVE_BG,
+                           activeforeground=BUTTON_ACTIVE_FG,
+                           width=12, relief="raised", bd=2)
+        btn_ok.pack(pady=(10, 0))
+
+        self.window.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width() - self.WINDOW_WIDTH) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.WINDOW_HEIGHT) // 2
+        self.window.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.window.lift()
+        self.window.focus_force()
+
+    def close(self):
+        logger.debug("RestartInfoWindow.close: закрытие инфо-окна")
+        if self.window.winfo_exists():
+            self.window.destroy()
+
 class SettingsWindow:
     def __init__(self, parent, app):
         logger.debug("SettingsWindow.__init__: создание окна настроек")
