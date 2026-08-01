@@ -54,23 +54,7 @@ os.makedirs("logs", exist_ok=True)
 faulthandler.enable(file=open(_CRASH_LOG, "ab", buffering=0), all_threads=True)
 # =================================================================
 
-# ========== ПУТЬ К КЭШУ HUGGING FACE ==========
-# Приоритет: переменная окружения HF_HOME > старый кэш на этом ПК > локальная папка hf_cache/
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-LEGACY_CACHE = "D:/ProgramData/.cache/huggingface"
-LOCAL_CACHE = os.path.join(PROJECT_DIR, "hf_cache")
-if not os.environ.get("HF_HOME"):
-    if os.path.isdir(LEGACY_CACHE):
-        CUSTOM_CACHE = LEGACY_CACHE
-    else:
-        CUSTOM_CACHE = LOCAL_CACHE
-        os.makedirs(CUSTOM_CACHE, exist_ok=True)
-    os.environ["HF_HOME"] = CUSTOM_CACHE
-    os.environ["TRANSFORMERS_CACHE"] = CUSTOM_CACHE
-    os.environ["HUGGINGFACE_HUB_CACHE"] = CUSTOM_CACHE
-# ================================================
-
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 import sys
 import json
@@ -103,6 +87,7 @@ DEFAULT_SETTINGS = {
     "language": "auto",
     "autostart": False,
     "hotkey": "left alt+caps lock",
+    "input_device": None,
     "gain_db": 10.0,
     "normalize": True,
     "noise_reduction": False,

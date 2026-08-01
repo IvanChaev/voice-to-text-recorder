@@ -5,6 +5,7 @@ import os
 import sys
 import shutil
 import logging
+from hotkey import parse_hotkey
 from main import load_settings, save_settings
 
 # --- Цветовая схема (тёмная тема) ---
@@ -385,6 +386,13 @@ class SettingsWindow:
 
             if not new_settings["hotkey"]:
                 raise ValueError("Горячая клавиша не может быть пустой.")
+            try:
+                parse_hotkey(new_settings["hotkey"])
+            except ValueError as e:
+                raise ValueError(
+                    f"Неверная горячая клавиша '{new_settings['hotkey']}': {e}.\n"
+                    f"Примеры: f8, ctrl+shift+f9, left alt+caps lock"
+                )
             
             if new_settings["device"] == "cpu":
                 new_settings["compute_type"] = "float32"

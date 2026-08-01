@@ -70,6 +70,45 @@ logger.info("="*60)
 
 SAMPLE_RATE = 16000
 
+
+def resolve_input_device(settings):
+    """Возвращает device для sd.InputStream из настроек: индекс или имя.
+
+    Возвращает None (устройство по умолчанию), если значение не задано,
+    не является входным устройством или недоступно.
+    """
+    dev = settings.get("input_device")
+    if dev is None or dev == "" or dev == 0:
+        return None
+    if isinstance(dev, str):
+        dev = dev.strip()
+        if not dev:
+            return None
+        try:
+            dev = int(dev)
+        except ValueError:
+            name_low = dev.lower()
+            try:
+                for i, info in enumerate(sd.query_devices()):
+                    if (name_low in str(info.get("name", "")).lower()
+                            and info.get("max_input_channels", 0) > 0):
+                        logger.info(f"Устройство ввода по имени: '{dev}' → индекс {i}")
+                        return i
+            except Exception as e:
+                logger.warning(f"Не удалось перечислить аудиоустройства: {e}")
+            logger.warning(f"Устройство ввода '{dev}' не найдено, использую устройство по умолчанию")
+            return None
+    try:
+        info = sd.query_devices(dev)
+        if info.get("max_input_channels", 0) <= 0:
+            logger.warning(f"Устройство {dev} не поддерживает запись, использую устройство по умолчанию")
+            return None
+        return dev
+    except Exception as e:
+        logger.warning(f"Устройство ввода {dev} недоступно ({e}), использую устройство по умолчанию")
+        return None
+
+
 class VoiceRecorderApp:
     def __init__(self, root):
         logger.debug("Инициализация VoiceRecorderApp")
@@ -85,6 +124,9 @@ class VoiceRecorderApp:
 
         self.settings = load_settings()
         logger.info(f"Параметры приложения загружены: {self.settings}")
+
+        if self.settings.get("enable_time_stretch", False) and not RUBBERBAND_AVAILABLE:
+            logger.warning("enable_time_stretch включён, но pyrubberband (внешний бинарник rubberband) недоступен — изменение темпа не будет применяться")
 
         self.transcriber = None
         self.model_loaded = False
@@ -219,7 +261,12 @@ class VoiceRecorderApp:
 
     def _on_model_loaded(self):
         hotkey = self.settings.get("hotkey", "f9")
-        self.label_status.config(text=f"Нажмите 'Запись' или {hotkey}")
+        if self.hotkey_handler.registered:
+            self.label_status.config(text=f"Нажмите 'Запись' или {hotkey}")
+        else:
+            hint = self.hotkey_handler.error_message or "неизвестная причина"
+            self.label_status.config(text=f"Хоткей не зарегистрирован: {hint}")
+            logger.error(f"Хоткей не зарегистрирован: {hint}")
         self.button_record.config(state="normal")
         log_system_state("Модель успешно загружена в память")
         self.tray.update_state(False)
@@ -229,7 +276,13 @@ class VoiceRecorderApp:
         self.label_status.config(text=f"Ошибка инициализации: {error}")
         self.tray.update_state(True)
         tts_helper.say("Ошибка загрузки модели")
-        messagebox.showerror("Критическая ошибка", f"Не удалось поднять модель Whisper:\n{error}")
+        hint = ""
+        err_low = str(error).lower()
+        if any(k in err_low for k in ("cuda", "cudnn", "cublas", "gpu", "nvidia")):
+            hint = ("\n\nПохоже на проблему с CUDA/GPU.\n"
+                    "Попробуйте в настройках сменить 'Устройство' на CPU "
+                    "или проверить драйверы NVIDIA и совместимость CUDA/cuDNN с ctranslate2.")
+        messagebox.showerror("Критическая ошибка", f"Не удалось поднять модель Whisper:\n{error}{hint}")
 
     def open_settings(self):
         if self.settings_window is not None:
@@ -354,8 +407,18 @@ class VoiceRecorderApp:
             self.stop_recording()
             self.root.after(0, lambda: tts_helper.say("Лимит времени"))
 
+    def _resolve_input_device(self):
+        """Возвращает device для sd.InputStream из настроек (см. resolve_input_device)."""
+        return resolve_input_device(self.settings)
+
     def record_audio(self):
         logger.info("Запуск фонового аудиопотока InputStream.")
+        device = self._resolve_input_device()
+        if device is not None:
+            logger.info(f"Использую устройство ввода: {device} ({sd.query_devices(device).get('name', '?')})")
+        else:
+            logger.info("Использую устройство ввода по умолчанию")
+
         def callback(indata, frames, time_info, status):
             try:
                 if status:
@@ -367,7 +430,7 @@ class VoiceRecorderApp:
                 logger.error(f"Необработанная ошибка в audio callback: {e}", exc_info=True)
 
         try:
-            with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, callback=callback):
+            with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, callback=callback, device=device):
                 while self.is_recording:
                     sd.sleep(50)
         except Exception as e:
