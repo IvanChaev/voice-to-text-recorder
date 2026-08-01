@@ -48,11 +48,14 @@ set "FLAG="
 set "FLAG_AGE=0"
 set "MODE="
 set "WAIT_ELAPSED=0"
+set "START_REASON="
 
 call :check_state
 if "!ALIVE!"=="1" (
+    set "START_REASON=restart"
     call :log "СТАТУС: программа работает (pid !PID!), начинаю наблюдение"
 ) else (
+    set "START_REASON=first"
     call :log "СТАТУС: программа не запущена - !CAUSE!. Начинаю наблюдение"
 )
 
@@ -65,13 +68,21 @@ if "!MODE!"=="wait_boot" (
         set "DEAD_COUNT=0"
         set "FAST_DEATHS=0"
         set "LAST_STATUS=alive"
-        call :log "СТАТУС: программа запустилась после перезапуска (pid !PID!), начинаю наблюдение"
+        if "!START_REASON!"=="first" (
+            call :log "СТАТУС: программа запущена (pid !PID!), начинаю наблюдение"
+        ) else (
+            call :log "СТАТУС: программа запустилась после перезапуска (pid !PID!), начинаю наблюдение"
+        )
     ) else (
         set /a "WAIT_ELAPSED+=!CHECK_INTERVAL!"
         if !WAIT_ELAPSED! GEQ !BOOT_WAIT! (
             set "MODE="
             set "DEAD_COUNT=0"
-            call :log "ОШИБКА: программа не поднялась за !BOOT_WAIT! сек после перезапуска - повторная попытка"
+            if "!START_REASON!"=="first" (
+                call :log "ОШИБКА: программа не поднялась за !BOOT_WAIT! сек после запуска - повторная попытка"
+            ) else (
+                call :log "ОШИБКА: программа не поднялась за !BOOT_WAIT! сек после перезапуска - повторная попытка"
+            )
             call :try_restart
         )
     )
@@ -92,6 +103,7 @@ if "!MODE!"=="wait_restart" (
             set "MODE="
             set "DEAD_COUNT=0"
             set "LAST_STATUS="
+            set "START_REASON=restart"
             call :log "ОШИБКА: внутренний перезапуск не удался, программа не вернулась за !RESTART_WAIT! сек - выполняю перезапуск"
             call :try_restart
         )
@@ -119,11 +131,17 @@ if "!ALIVE!"=="1" (
             ) else (
                 call :log "КРИТИЧНО: программа завершена нештатно - !CAUSE!"
                 set "LAST_STATUS=dead"
+                set "START_REASON=restart"
                 if "!RESTART_ENABLED!"=="1" call :try_restart
             )
             if exist "!FLAGFILE!" del "!FLAGFILE!" 2>nul
         ) else (
-            if "!LAST_STATUS!"=="alive" call :log "КРИТИЧНО: программа упала - !CAUSE!"
+            if "!LAST_STATUS!"=="alive" (
+                set "START_REASON=restart"
+                call :log "КРИТИЧНО: программа упала - !CAUSE!"
+            ) else (
+                set "START_REASON=first"
+            )
             set "LAST_STATUS=dead"
             if "!RESTART_ENABLED!"=="1" call :try_restart
         )
@@ -189,8 +207,16 @@ if not exist "!STARTBAT!" (
         set "MISSING_LOGGED=1"
     )
 ) else (
-    echo watchdog> "!INFOFILE!"
-    call :log "ПЕРЕЗАПУСК программы..."
+    if "!START_REASON!"=="restart" (
+        echo watchdog> "!INFOFILE!"
+    ) else (
+        if exist "!INFOFILE!" del "!INFOFILE!" 2>nul
+    )
+    if "!START_REASON!"=="first" (
+        call :log "ЗАПУСК программы..."
+    ) else (
+        call :log "ПЕРЕЗАПУСК программы..."
+    )
     start "" /min "!STARTBAT!"
 )
 set "DEAD_COUNT=0"
