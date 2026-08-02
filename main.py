@@ -54,7 +54,7 @@ os.makedirs("logs", exist_ok=True)
 faulthandler.enable(file=open(_CRASH_LOG, "ab", buffering=0), all_threads=True)
 # =================================================================
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.0"
 
 import sys
 import json
